@@ -61,6 +61,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  register: (email: string, password: string, name?: string) =>
+    request<{ token: string }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, name }),
+    }),
   getProcesses: () => request<DesignProcess[]>("/api/processes"),
   createProcess: () =>
     request<DesignProcess>("/api/processes", {

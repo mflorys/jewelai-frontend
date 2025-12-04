@@ -23,14 +23,16 @@ const steps = [
 
 export function ProcessStrip() {
   return (
-    <div className="space-y-8">
+    <motion.div
+      className="space-y-8"
+      initial={{ opacity: 0, y: 50 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.1 }}
+      transition={{ duration: 0.8, ease: "easeOut" }}
+    >
       <h2 className="serif-heading text-3xl text-ink sm:text-4xl">
         One flow, no chaos
       </h2>
-      <p className="max-w-2xl text-sm text-ash">
-        The frontend mirrors your backend models — DesignProcess, status endpoints,
-        and structured answers. Every project moves consistently from intake to delivery.
-      </p>
 
       <div className="relative mt-6">
         <div className="absolute left-0 right-0 top-8 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
@@ -61,6 +63,6 @@ export function ProcessStrip() {
           ))}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

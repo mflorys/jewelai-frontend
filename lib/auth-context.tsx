@@ -32,9 +32,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const parts = idToken.split(".");
       if (parts.length < 2) return fallback ?? null;
       const payload = JSON.parse(atob(parts[1]));
+      // Prefer name from token, then fallback if it's not an email, then other token fields
+      const tokenName = payload.name;
+      const tokenEmail = payload.email;
+      const fallbackName = fallback && !fallback.includes("@") ? fallback : null;
+      
       return (
-        payload.name ||
-        payload.email ||
+        tokenName ||
+        fallbackName ||
+        tokenEmail ||
         payload.sub ||
         payload.preferred_username ||
         fallback ||
@@ -45,12 +51,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Initial hydration from localStorage
   useEffect(() => {
     const stored = getToken();
     setTokenState(stored);
     setUserName(deriveNameFromToken(stored) ?? null);
     setHydrated(true);
   }, []);
+
+  // Sync with localStorage on route changes and add storage event listener
+  useEffect(() => {
+    if (!hydrated) return;
+
+    // Listen for storage changes (e.g., from other tabs)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "jewelai_token") {
+        const stored = getToken();
+        setTokenState(stored);
+        setUserName(deriveNameFromToken(stored) ?? null);
+      }
+    };
+
+    // Defensive check: if token state is null but localStorage has a token, reload it
+    // This helps recover from state loss during navigation
+    const stored = getToken();
+    if (!token && stored) {
+      setTokenState(stored);
+      setUserName(deriveNameFromToken(stored) ?? null);
+    }
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [hydrated]); // Removed token from dependencies to avoid loops
 
   const value = useMemo(
     () => ({
@@ -87,7 +119,12 @@ export function useAuthGuard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (hydrated && !token) {
+    if (!hydrated) return;
+    
+    // Check token state first, then fallback to localStorage directly
+    const hasToken = token || getToken();
+    
+    if (!hasToken) {
       router.replace("/login");
     }
   }, [hydrated, token, router]);

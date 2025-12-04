@@ -16,12 +16,6 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             </span>
           </Link>
           <nav className="flex items-center gap-5 text-sm text-ash">
-            <a href="#how-it-works" className="transition hover:text-ink">
-              How it works
-            </a>
-            <a href="#features" className="transition hover:text-ink">
-              Workflow
-            </a>
             <Link
               href="/login"
               className="rounded-full border border-ink/10 bg-ink px-5 py-2 text-sm font-semibold text-ivory shadow-md transition hover:-translate-y-[1px] hover:shadow-luxe"

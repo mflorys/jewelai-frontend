@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/cn";
@@ -115,6 +116,21 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        <div className="border-t border-black/5 pt-6">
+          <p className="mb-4 text-center text-sm text-ash">
+            Don't have an account?
+          </p>
+          <Link
+            href="/register"
+            className={cn(
+              "inline-flex w-full items-center justify-center rounded-full border border-black/10 bg-white px-6 py-3 text-sm font-semibold text-coal shadow-sm transition",
+              "hover:-translate-y-[1px] hover:shadow-md",
+            )}
+          >
+            Sign up
+          </Link>
+        </div>
       </div>
     </div>
   );
