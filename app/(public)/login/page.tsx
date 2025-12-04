@@ -1,20 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { getToken } from "@/lib/auth-storage";
 import { cn } from "@/lib/cn";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { saveToken } = useAuth();
+  const { saveToken, hydrated } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (!hydrated) return;
+    
+    const token = getToken();
+    if (token) {
+      router.replace("/projects");
+    }
+  }, [hydrated, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

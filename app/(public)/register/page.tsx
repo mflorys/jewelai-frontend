@@ -1,15 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { getToken } from "@/lib/auth-storage";
 import { cn } from "@/lib/cn";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { saveToken } = useAuth();
+  const { saveToken, hydrated } = useAuth();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (!hydrated) return;
+    
+    const token = getToken();
+    if (token) {
+      router.replace("/projects");
+    }
+  }, [hydrated, router]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
