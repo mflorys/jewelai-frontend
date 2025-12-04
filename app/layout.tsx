@@ -1,9 +1,23 @@
 import type { Metadata } from "next";
+import { Manrope, Playfair_Display } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
+
+const sans = Manrope({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
+});
+
+const serif = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
-  title: "JewelAI Process Hub",
-  description: "From intake quiz to production-ready jewelry workflows.",
+  title: "JewelAI Studio",
+  description: "Premium jewelry design workflow from discovery to delivery.",
 };
 
 export default function RootLayout({
@@ -12,9 +26,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pl">
-      <body className="bg-jewel-bg text-white antialiased">
-        {children}
+    <html lang="en">
+      <body className={`${sans.variable} ${serif.variable} bg-sand text-coal`}>
+        <Providers>
+          <div className="min-h-screen bg-gradient-to-b from-ivory via-sand to-parchment">
+            {children}
+          </div>
+        </Providers>
       </body>
     </html>
   );

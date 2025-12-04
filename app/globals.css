@@ -1,13 +1,19 @@
-/* app/globals.css */
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  @apply bg-jewel-bg text-white antialiased;
+  @apply bg-sand text-coal antialiased font-sans;
+}
+
+.serif-heading {
+  @apply font-serif tracking-tight;
+}
+
+.card-surface {
+  @apply rounded-2xl border border-black/5 bg-white/70 shadow-luxe;
 }

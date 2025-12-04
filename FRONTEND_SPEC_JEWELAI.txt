@@ -1,0 +1,286 @@
+TASK FOR CURSOR: Build a minimal Next.js frontend for JewelAI using the backend API described below. 
+Use Next.js (App Router), TypeScript, React Query (or TanStack Query) and Tailwind CSS.
+Visual style: premium jewelry brand – black, white, soft beige, gold accents, thin serif fonts for headings, clean sans-serif for body text.
+Very important: DO NOT use the word "quiz" in any user-facing text (no labels, buttons, headings). In the code you may use "quiz" in types/interfaces if needed, but never in visible copy. Use wording like "design questions", "style preferences", "short questionnaire", "project setup" etc.
+
+========================================
+1. GLOBAL UX CONCEPT (MINIMAL NAVIGATION)
+========================================
+The app has exactly three top-level user experiences:
+
+1) Login
+   - Screen for entering email + password.
+   - After successful login, user is redirected to the Projects (dashboard).
+
+2) Projects (Dashboard)
+   - Single page where user:
+     - sees all their projects (design processes),
+     - can select a project and see its current status + basic info,
+     - can start a new project (opens the "create project" flow),
+     - can continue the "design questions" flow for a project that is still in the intake stage.
+   - This is a single screen; do NOT create a separate top-level navigation item for project details. 
+     Project details can be shown in a right-side panel or a sub-view on the same page.
+
+3) Create New Project (One-question-per-step flow)
+   - A guided, step-by-step flow where user answers design questions for the new project.
+   - One question per step (single screen at a time).
+   - After finishing all questions, the backend sets the process status to READY_FOR_GENERATION automatically.
+   - From the user’s perspective, this is "New project setup", not a "quiz".
+
+You are allowed to implement additional internal routes (e.g., /projects/[id]) if needed for technical clarity, but the UX should feel like only these three main experiences exist.
+
+========================================
+2. BACKEND API CONTRACT (SUMMARY)
+========================================
+
+Auth: JWT Bearer, already handled by backend.
+
+Key endpoints (all require Authorization header):
+
+POST /api/processes
+- Creates a new design process for current user.
+- Response body: JSON with process object:
+  { id, title, status, type, createdAt, updatedAt, ... }
+
+GET /api/processes
+- Returns a list of processes for current user.
+- Each item: { id, title, status, type, createdAt, updatedAt, ... }
+
+GET /api/processes/{id}
+- Returns full details of a single process.
+
+PUT /api/processes/{id}/title
+- Body: { "title": "New title" }
+- Renames a project.
+
+GET /api/processes/{id}/status
+- Returns minimal status info:
+  { id, status, updatedAt, type, title }
+
+POST /api/processes/{id}/start-generation
+- Only valid if status == READY_FOR_GENERATION.
+- Triggers external generation and sets status = GENERATION_REQUESTED.
+
+POST /api/quiz/processes/{id}/answers
+- Body: { "questionId": number, "answerJson": any-json }
+- Saves or updates one answer for given process and question.
+- When all active questions are answered, backend automatically:
+  - sets process.status = READY_FOR_GENERATION
+  - sets process.type based on the JEWELRY_TYPE answer (or "UNDEFINED").
+
+GET /api/quiz/processes/{id}/answers
+- Returns list of answers for the given process:
+  [
+    {
+      "questionId": number,
+      "questionCode": string,
+      "answerJson": any-json,
+      "answeredAt": timestamp
+    },
+    ...
+  ]
+
+There is also a QuizQuestion model and endpoints (not detailed here), but you can assume:
+- we can fetch all active questions in a known order,
+- each question has: id, code (e.g., "JEWELRY_TYPE"), questionJson (metadata for rendering).
+
+========================================
+3. NEXT.JS APP STRUCTURE
+========================================
+
+Use Next.js App Router with the following main routes:
+
+/login
+- Public route (no auth guard).
+- Contains:
+  - brand logo / wordmark "JEWELAI" (thin serif),
+  - short tagline,
+  - email and password fields,
+  - "Sign in" button.
+- On successful login, store JWT (e.g., in localStorage or HTTP-only cookie if we later add SSR) and redirect to /projects.
+
+/projects
+- Protected route (requires JWT; if missing, redirect to /login).
+- This is the main dashboard for all projects.
+- Layout:
+  - Left side: list of projects.
+  - Right side: detail area for selected project.
+
+Left side:
+  - Button: "Start a new project"
+  - List of project cards:
+    - Title
+    - Status badge
+    - Type (if available)
+    - Last updated (e.g., "Updated 3 hours ago")
+
+Right side (when a project is selected):
+  - Project title (editable inline; on blur or on "Save", call PUT /api/processes/{id}/title).
+  - Status badge (mapping of backend status to human-readable labels).
+  - Type (e.g., "Ring", "Pendant" or "Not set yet").
+  - Section "Design setup":
+    - If status == INTAKE_IN_PROGRESS:
+      - Show summary of answered questions (optional).
+      - Show primary button: "Continue design questions".
+      - Clicking this button opens the one-question-per-step flow for this project.
+    - If status == READY_FOR_GENERATION:
+      - Show explanation text and a primary button "Generate design preview".
+      - Button calls POST /api/processes/{id}/start-generation.
+      - After calling, start polling GET /api/processes/{id}/status.
+    - If status == GENERATION_REQUESTED:
+      - Show "Your design is being prepared..." message.
+      - Poll GET /api/processes/{id}/status every few seconds.
+    - If status >= VISUAL_READY:
+      - Show visualization preview (when endpoint and visualizationUrl are available later).
+      - Show possible follow-up actions (accept, send for review, etc. in the future).
+
+Internally, you may implement an additional route such as:
+/projects/[id] for the detail view, but UX navigation should still appear as a single “Projects” screen.
+
+Create New Project flow:
+Option A (simpler): When user clicks "Start a new project" on /projects:
+  - Call POST /api/processes.
+  - Redirect immediately to /projects/[newId]/design (or open a full-screen wizard overlay on top of /projects).
+Option B: Direct route /projects/new that creates a process on first step.
+
+You are free to choose one, but the UX must feel like:
+- Click "Start a new project" on dashboard → user is taken into a guided question flow for that new project.
+
+========================================
+4. ONE-QUESTION-PER-STEP FLOW (NO "QUIZ" WORD)
+========================================
+
+Route example: /projects/[id]/design (or similar). This route is accessed when:
+- User creates a new project, or
+- User chooses "Continue design questions" for an existing project with status INTAKE_IN_PROGRESS.
+
+Behaviour:
+- Fetch current process via GET /api/processes/{id}.
+- Fetch active questions (order defined by backend).
+- Fetch existing answers via GET /api/quiz/processes/{id}/answers.
+- Determine current step:
+  - The first question without an answer,
+  - or resume from first unanswered question in the sequence.
+
+UI for each step:
+- Show step indicator (e.g., "Step 2 of 7").
+- Show question text and subtext based on questionJson.
+- Render appropriate input control depending on questionJson:
+  - Single choice buttons
+  - Radio list
+  - Text input
+  - Select, etc.
+- Primary button text should be something like:
+  - "Next"
+  - "Continue"
+  - "Save and continue"
+- For the final question, button text: "Finish setup".
+
+Saving an answer:
+- On click of primary button, call:
+  POST /api/quiz/processes/{id}/answers
+  with:
+  {
+    "questionId": currentQuestion.id,
+    "answerJson": <structured JSON from the UI>
+  }
+- After success:
+  - Move to the next question.
+  - If that was the last question:
+    - Backend will automatically set status = READY_FOR_GENERATION.
+    - Redirect user back to /projects.
+    - On /projects, highlight the newly completed project as "Ready to generate".
+
+IMPORTANT TEXT CONSTRAINT:
+- Never show the word "quiz" in any title, description, or button label.
+- Use alternatives like:
+  - "Answer a few design questions"
+  - "Project setup"
+  - "Jewelry preferences"
+  - "Style questionnaire"
+  but not literally "quiz".
+
+========================================
+5. STYLE & THEME (PREMIUM JEWELRY BRAND)
+========================================
+
+Implement a design system consistent with:
+- Background: soft warm off-white / light beige for main background.
+- Primary text: near-black.
+- Accent color: gold (#D4AF37-like tone) for borders, badges, and highlights.
+- Secondary dark surfaces: pure black or very dark charcoal for key hero areas.
+- Fonts:
+  - Serif (thin, elegant) for large headings and logo (e.g., "JEWELAI").
+  - Clean sans-serif for body text and labels.
+
+Use Tailwind to define:
+- Custom colors: background, surface, gold, text-main, text-muted.
+- Border radius: subtle, 12–16px.
+- Soft shadows for cards, especially project cards and modals.
+
+Key UI components:
+- Primary button (solid black with white text and subtle gold hover).
+- Secondary button (white with gold border).
+- Status badge:
+  - INTAKE_IN_PROGRESS → "Design in progress", neutral
+  - READY_FOR_GENERATION → "Ready to generate", gold accent
+  - GENERATION_REQUESTED → "Generating…", neutral with spinner
+  - VISUAL_READY → "Preview ready", gold accent
+  - others → minimal labels (can be added later)
+
+========================================
+6. TECHNICAL IMPLEMENTATION NOTES
+========================================
+
+State management:
+- Use React Query for:
+  - fetching process list
+  - fetching single process
+  - fetching status (with polling)
+  - fetching questions and answers
+  - mutations for:
+    - create process
+    - save answer
+    - update title
+    - start generation
+
+API client:
+- Create a small wrapper around fetch or axios:
+  - automatically adds Authorization: Bearer <token> from storage
+  - parses JSON
+  - throws normalized errors
+
+Auth guard:
+- Implement a simple hook/useEffect at the layout level for /projects and children:
+  - if no token → redirect to /login.
+
+Error handling:
+- For 401/403:
+  - show message and redirect to /login.
+- For other errors:
+  - show inline toast or error box at the top of the screen.
+
+Responsiveness:
+- On mobile:
+  - Projects list should be a vertical list with ability to tap a project and expand details below.
+  - New project flow should be full-screen, single column.
+
+Assets:
+- Use existing premium-style dashboard concept image as inspiration only.
+- Do not hard-code any base64 images in components; static assets should live in /public and be referenced via standard Next.js asset paths.
+
+========================================
+7. DELIVERABLES
+========================================
+
+Cursor, please:
+1) Initialize a Next.js App Router project with TypeScript and Tailwind.
+2) Implement:
+   - /login page
+   - /projects page (including embedded detail view)
+   - /projects/[id]/design or equivalent route for one-question-per-step flow.
+3) Implement API client, React Query provider, auth token storage and guards.
+4) Implement all UI strictly following the premium jewelry style and text constraints (no "quiz" in UI).
+5) Keep the codebase clean, modular, and ready for future expansion (e.g., visualization preview, admin view).
+
+Backend is up and running on http://localhost:8080

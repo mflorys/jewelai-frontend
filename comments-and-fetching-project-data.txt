@@ -1,0 +1,54 @@
+TASK: Update Next.js frontend to support new backend structure and comment editing rules.
+
+CHANGES REQUIRED:
+
+1️⃣ USE NEW ENDPOINT FOR LOADING PROJECT DATA
+- Replace multiple fetches with a single call to:
+  GET /api/processes/{id}/details
+- Returned fields include:
+  id, title, status, type, createdAt, updatedAt,
+  additionalComment, visualizationUrl, answers[]
+
+Front-end should store these in local state:
+{
+  title,
+  status,
+  additionalComment,
+  visualizationUrl,
+  answers
+}
+
+2️⃣ ADD COMMENT TEXTAREA TO PROJECT DETAILS PAGE
+- Add a textarea labeled "Your note"
+- Pre-fill with additionalComment from API
+- Local state: const [comment, setComment] = useState(project.additionalComment ?? "")
+- Show character limit 500 (optional UI hint)
+- If comment is empty → treat as null when saving
+
+3️⃣ ENABLE EDITING ONLY WHILE STATUS < GENERATED
+- If project.status is "READY_FOR_GENERATION" or earlier → textarea enabled + Save button visible.
+- If project.status >= "GENERATED" → textarea disabled and Save button hidden.
+- Use numeric order if mapping enum to UI is needed.
+
+Logic:
+const isEditable = ["INTAKE_IN_PROGRESS","READY_FOR_GENERATION","GENERATION_REQUESTED"].includes(project.status)
+
+4️⃣ SAVE COMMENT WITH PATCH
+PATCH /api/processes/{id}/comment
+Body:
+{ "comment": comment }  // send null or "" to clear
+
+After save:
+- Show toast "Saved"
+- Refetch process details from /details OR update local state only.
+
+5️⃣ UI BEHAVIOR
+- Save button disabled if no changes
+- While saving → show spinner
+- After save → disable spinner + confirm toast
+
+6️⃣ ACCEPTANCE CRITERIA:
+- Comment loads from backend correctly
+- Can edit and save before image is generated
+- Cannot edit after image exists OR status >= GENERATED
+- Page uses only GET /details for loading initial data

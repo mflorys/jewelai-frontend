@@ -1,0 +1,277 @@
+SYSTEM TASK FOR CURSOR: Build a complete frontend for JewelAI Studio based on the following backend and business specification. Treat everything below as ground truth and use it to implement all screens, UI flows, API calls, and state machines.
+
+===========================================
+SECTION 1 — BACKEND FUNCTIONAL DESCRIPTION
+===========================================
+
+TECH STACK:
+Spring Boot 3, Java 21
+Security: JWT (Bearer)
+Database: PostgreSQL
+JPA/Hibernate 7.x
+Entities: UserEntity, DesignProcess, QuizQuestion, UserAnswer
+Primary domain: quiz-driven jewelry design process
+
+-------------------------------------------
+1. DESIGN PROCESS ENTITY
+-------------------------------------------
+Fields:
+id (Long)
+user (UserEntity)
+title (String, editable by user)
+status (enum): INTAKE_IN_PROGRESS, READY_FOR_GENERATION, GENERATION_REQUESTED, VISUAL_READY, CLIENT_ACCEPTED, SENT_TO_REVIEW, APPROVED_FOR_PRODUCTION, IN_PRODUCTION, CRAFTED, SHIPPING, IN_DELIVERY, COMPLETED, RETURN_IN_PROGRESS
+type (String, derived from quiz answer JEWELRY_TYPE)
+createdAt (Instant)
+updatedAt (Instant)
+externalJobId (String)
+visualizationUrl (String | optional)
+
+Lifecycle:
+- Created via POST /api/processes → status defaults to INTAKE_IN_PROGRESS, title = "Project #n"
+- User answers quiz questions through POST /api/quiz/processes/{id}/answers
+- When all active quiz questions are answered + JEWELRY_TYPE is present, backend sets:
+status = READY_FOR_GENERATION
+type = extracted from JEWELRY_TYPE answer
+- User triggers generation: POST /api/processes/{id}/start-generation
+→ status becomes GENERATION_REQUESTED
+→ backend sends request to worker (currently stubbed)
+- Worker callback (future): sets VISUAL_READY + visualizationUrl
+- Later statuses flow manually/mechanically
+
+-------------------------------------------
+2. QUIZ MODEL
+-------------------------------------------
+QuizQuestion:
+id
+code (string, unique)
+questionJson (json)
+active (boolean)
+
+UserAnswer:
+id
+process
+question
+user
+answerJson (jsonb)
+answeredAt (Instant)
+
+Rules:
+- A process must answer ALL active questions.
+- There must be a question with code = "JEWELRY_TYPE".
+- The answerJson is JSON, not plain string.
+- When the last answer is saved:
+process.status = READY_FOR_GENERATION
+process.type = extracted type or "UNDEFINED"
+
+-------------------------------------------
+3. BACKEND ENDPOINTS
+-------------------------------------------
+
+AUTHENTICATION:
+Bearer JWT required for all endpoints.
+
+CREATE PROCESS:
+POST /api/processes
+Creates a new design process for the authenticated user.
+Returns process JSON.
+
+LIST PROCESSES:
+GET /api/processes
+Returns all processes for logged-in user.
+
+GET SINGLE PROCESS:
+GET /api/processes/{id}
+Fetch process details.
+
+EDIT TITLE:
+PUT /api/processes/{id}/title
+Body: { "title": "New title" }
+Allows user to rename the process.
+
+START GENERATION:
+POST /api/processes/{id}/start-generation
+Allowed only if status == READY_FOR_GENERATION.
+Sets status = GENERATION_REQUESTED.
+
+GET PROCESS STATUS:
+GET /api/processes/{id}/status
+Returns minimal object:
+{ id, status, updatedAt, type, title }
+
+SUBMIT QUIZ ANSWER:
+POST /api/quiz/processes/{id}/answers
+Body: { questionId, answerJson }
+Saves/updates answer for given process.
+Handles automatic READY_FOR_GENERATION transition.
+
+GET ALL ANSWERS FOR PROCESS:
+GET /api/quiz/processes/{id}/answers
+Returns list of:
+questionId, questionCode, answerJson, answeredAt
+
+-------------------------------------------
+4. FUTURE ENDPOINTS (NOT IMPLEMENTED YET)
+-------------------------------------------
+Worker callback:
+POST /api/processes/{id}/visual-ready
+Body: { visualizationUrl }
+
+User acceptance:
+POST /api/processes/{id}/accept
+
+Admin review flow:
+POST /api/processes/{id}/approve-for-production
+POST /api/processes/{id}/mark-crafted
+POST /api/processes/{id}/ship
+POST /api/processes/{id}/deliver
+
+Frontend should be prepared for this expansion.
+
+
+===========================================
+SECTION 2 — FRONTEND APPLICATION SPEC
+===========================================
+
+GOAL:
+A clean client-facing UI for the full jewelry design process:
+- showing the list of projects
+- creating a new project
+- completing the quiz
+- tracking process status
+- previewing generated visualization
+- renaming projects
+- triggering generation
+
+REQUIREMENTS:
+Use a modern frontend stack (React, Next.js, or Vite+TS). Must include:
+- JWT auth handling (login/register will be added later)
+- API client abstraction
+- state machines for process lifecycle
+- responsive UI
+- reusable components for quiz rendering
+
+-------------------------------------------
+FRONTEND SCREENS
+-------------------------------------------
+
+1. LOGIN SCREEN (placeholder for now)
+Simple form: email + password.
+On submit, call backend auth (will be available soon).
+Store JWT in memory (or localStorage temporarily).
+
+2. DASHBOARD / PROJECT LIST
+GET /api/processes
+Shows:
+- project title
+- status
+- type (if available)
+- updatedAt
+
+Actions:
+- Create new project (POST /api/processes)
+- Click project to go to project detail page
+
+3. PROJECT DETAIL SCREEN
+GET /api/processes/{id}
+GET /api/quiz/processes/{id}/answers
+
+Show:
+- Title (editable inline via PUT /api/processes/{id}/title)
+- Status badge
+- Type (if filled)
+- Primary CTA depending on status:
+
+IF status = INTAKE_IN_PROGRESS → show button: "Start Quiz"  
+IF status = READY_FOR_GENERATION → show button: "Generate Visualization"  
+IF status = GENERATION_REQUESTED → show spinner + auto-refresh status endpoint  
+IF status = VISUAL_READY → display image via visualizationUrl  
+IF later statuses → display production tracking timeline  
+
+4. QUIZ SCREEN
+GET /api/quiz/questions (if exists) or embed from config
+Render each quiz question dynamically based on questionJson.
+User selects answers → POST /api/quiz/processes/{id}/answers.
+
+After all questions answered → redirect to project detail: status should now show READY_FOR_GENERATION.
+
+5. GENERATION SCREEN/STAGE
+When user clicks "Generate Visualization":
+POST /api/processes/{id}/start-generation
+
+Then:
+- Disable button
+- Poll GET /api/processes/{id}/status every 3 seconds until VISUAL_READY
+
+After completion:
+show visualization image
+
+-------------------------------------------
+FRONTEND LOGIC RULES
+-------------------------------------------
+
+PROCESS CREATION:
+- On project creation → jump to the new project's detail page.
+
+QUIZ ANSWERING:
+- Each answer must be stored immediately via POST.
+- After last answer → update UI to show "Ready for Generation".
+
+STATUS POLLING:
+- If status IN [GENERATION_REQUESTED, IN_PRODUCTION, SHIPPING, etc], UI polls the status endpoint every few seconds.
+
+ERROR HANDLING:
+- 401 → redirect to login
+- 403 → show "Not authorized"
+- 400/500 → show inline error
+
+-------------------------------------------
+API CLIENT
+-------------------------------------------
+Implement a centralized API client class with:
+- automatic JWT header injection
+- response parsing
+- error normalization
+
+-------------------------------------------
+STATE MANAGEMENT
+-------------------------------------------
+Use lightweight mechanisms:
+- local React state
+- Zustand
+- or React Query
+
+React Query recommended for:
+- auto-refresh for polling endpoints
+- caching process lists
+- mutation handling
+
+-------------------------------------------
+VISUALIZATION VIEW
+-------------------------------------------
+If visualizationUrl exists:
+show image in high resolution inside responsive container.
+
+-------------------------------------------
+PROJECT TITLE EDIT
+-------------------------------------------
+Inline editable field (click → input → save via PUT → refresh process detail).
+
+-------------------------------------------
+COMPONENT REUSE
+-------------------------------------------
+Quiz answers, status badge, process card, CTA button logic — modular, reusable.
+
+-------------------------------------------
+READY FOR FUTURE FEATURES
+-------------------------------------------
+Frontend must be structured to easily add:
+- notifications
+- admin panel
+- multi-image previews
+- user profile and billing
+
+-------------------------------------------
+END OF SPEC
+-------------------------------------------
+
+CURSOR: Use this full specification to generate the entire frontend codebase (pages, components, API client, hooks, providers, routes, and UI interactions).

@@ -1,0 +1,70 @@
+TASK: Integrate backend endpoint POST /api/processes/{processId}/generate-image into the Project Details page.
+
+Requirements:
+
+1️⃣ Add a "Generate design" button on the project details view.
+- The button should only be visible AND enabled when DesignProcess.status === "READY_FOR_GENERATION".
+- Before that state → button hidden.
+- After image is generated → button hidden.
+
+2️⃣ UX during generation:
+- When clicked:
+  - disable button
+  - show spinner or text: "Generating design, please wait..."
+- Call backend:
+     POST /api/processes/{processId}/generate-image
+     headers: Authorization: Bearer <JWT> and JSON
+     no body required
+- Do NOT cancel generation if user closes or refreshes page → generation is server-side, so FE should poll.
+
+3️⃣ Polling:
+- Frontend should poll GET /api/processes/{processId}/status every 2–3s
+- Stop polling when status === "GENERATED"
+- Then fetch updated process data (GET /api/processes/{id}) to retrieve visualizationUrl.
+
+4️⃣ Display the generated result:
+- When status === "GENERATED" and visualizationUrl exists → render <img src={visualizationUrl} />
+- When status is generating (GENERATION_REQUESTED or GENERATING) → show "Generating..."
+
+5️⃣ Edge cases:
+- If API returns 400 (wrong status) → show toast: "This design is not ready to be generated yet."
+- If unauthorized (401) → redirect to login.
+- If 500 → toast: "Image generation failed, please try again."
+
+6️⃣ Component logic summary:
+
+ProcessDetails.tsx
+
+- state:
+  - process
+  - isGenerating (boolean)
+- show button only if process.status === "READY_FOR_GENERATION"
+- onClick → set isGenerating(true) → call POST /generate-image → start polling
+- add polling useEffect(() => { 
+      if (isGenerating) setInterval(checkStatus, 2500) 
+  })
+- When status returns GENERATED:
+       setIsGenerating(false)
+       setProcess(updatedProcess)
+- Render:
+  - If GENERATED → show <img />
+  - If isGenerating → show spinner
+  - Else if READY_FOR_GENERATION → show button
+
+7️⃣ The button label:
+- default: "Generate design"
+- when busy: "Generating…"
+
+8️⃣ Hide the generate button after success (status === GENERATED).
+
+9️⃣ Do not interrupt generation:
+- The backend handles the long-running job.
+- Frontend only polls.
+- No need for WebSockets for now.
+
+Deliverables:
+- Update ProjectDetails page
+- Add generate handler
+- Add polling hook or inline useEffect
+- Render image when ready
+- Hide button after success

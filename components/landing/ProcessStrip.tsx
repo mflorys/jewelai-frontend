@@ -4,36 +4,36 @@ import { motion } from "framer-motion";
 
 const steps = [
   {
-    label: "Quiz intake",
-    desc: "Klient odpowiada na pytania – wszystko ląduje w JSON-ie na procesie.",
+    label: "Discovery",
+    desc: "Capture preferences through guided design questions and store them with the project.",
   },
   {
-    label: "Process pipeline",
-    desc: "Proces idzie krok po kroku po statusach z backendu.",
+    label: "Generation",
+    desc: "Trigger preview generation when the last answer is saved, then track job progress.",
   },
   {
-    label: "Visualization",
-    desc: "Łączysz odpowiedzi z wizualizacją / modelem 3D.",
+    label: "Review",
+    desc: "Share visuals, request acceptance, or move to production when the client is ready.",
   },
   {
     label: "Delivery",
-    desc: "Status PRODUCTION / DELIVERY domyka temat.",
+    desc: "Follow shipping and delivery milestones without losing the design context.",
   },
 ];
 
 export function ProcessStrip() {
   return (
     <div className="space-y-8">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-        Jak JewelAI porządkuje chaos projektów
+      <h2 className="serif-heading text-3xl text-ink sm:text-4xl">
+        One flow, no chaos
       </h2>
-      <p className="max-w-2xl text-sm text-white/60">
-        Front jest cienką warstwą nad tym, co już masz w backendzie:
-        DesignProcess, DesignProcessStatus, QuizQuestion, UserAnswer.
+      <p className="max-w-2xl text-sm text-ash">
+        The frontend mirrors your backend models — DesignProcess, status endpoints,
+        and structured answers. Every project moves consistently from intake to delivery.
       </p>
 
       <div className="relative mt-6">
-        <div className="absolute left-0 right-0 top-8 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+        <div className="absolute left-0 right-0 top-8 h-px bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
         <div className="grid gap-8 md:grid-cols-4">
           {steps.map((step, i) => (
             <motion.div
@@ -42,22 +42,20 @@ export function ProcessStrip() {
               whileInView={{ y: 0, opacity: 1 }}
               viewport={{ once: true, amount: 0.4 }}
               transition={{ delay: i * 0.1, duration: 0.5 }}
-              className="relative"
+              className="relative rounded-2xl border border-black/5 bg-white/70 p-4 shadow-inner shadow-black/5"
             >
               <div className="mb-4 flex items-center gap-3">
                 <div className="relative">
-                  <div className="h-7 w-7 rounded-full bg-white/10 ring-2 ring-white/40" />
-                  <div className="absolute inset-0 animate-ping rounded-full bg-purple-500/30" />
+                  <div className="h-7 w-7 rounded-full border border-gold/40 bg-gold/20" />
+                  <div className="absolute inset-0 animate-ping rounded-full bg-gold/20" />
                 </div>
-                <span className="text-xs uppercase tracking-wide text-white/70">
+                <span className="text-xs uppercase tracking-wide text-ash">
                   {String(i + 1).padStart(2, "0")}
                 </span>
               </div>
               <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-white">
-                  {step.label}
-                </h3>
-                <p className="text-xs text-white/60">{step.desc}</p>
+                <h3 className="text-sm font-semibold text-ink">{step.label}</h3>
+                <p className="text-xs text-ash">{step.desc}</p>
               </div>
             </motion.div>
           ))}

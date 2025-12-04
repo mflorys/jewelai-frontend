@@ -1,0 +1,75 @@
+### TASK: Update the frontend Project Details page in Next.js to support:
+- Rendering the generated image from `imageUrl`
+- Handling generation state 
+- Using the full-project-details endpoint `/api/processes/{id}/details`
+- Showing a comment textarea (editable before image is generated)
+- Disable comment editing and hide Generate button if `status === 'GENERATED'`
+- Displaying loading UI during generation request
+- Handle the case where imageUrl points to backend local `/generated/*` OR Wasabi URL.
+
+### Changes to implement:
+
+#### 1️⃣ Update API client (api-client.ts)
+Add:
+- getProjectDetails(id)
+- generateImage(id)
+- updateComment(id, comment)
+
+Example:
+
+export async function getProjectDetails(id: number) {
+  const res = await fetch(`/api/processes/${id}/details`);
+  if (!res.ok) throw new Error("Failed to load project details");
+  return res.json();
+}
+
+export async function updateProjectComment(id: number, comment: string) {
+  const res = await fetch(`/api/processes/${id}/comment`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+  if (!res.ok) throw new Error("Failed to update comment");
+}
+
+export async function generateImage(id: number) {
+  const res = await fetch(`/api/processes/${id}/generate-image`, { method: "POST" });
+  if (!res.ok) throw new Error("Image generation failed");
+}
+
+#### 2️⃣ Update ProjectDetails page (app/projects/[id]/page.tsx)
+Add state:
+- project
+- isGenerating
+- comment
+
+On load:
+- call getProjectDetails()
+
+Render logic:
+- Display title, createdAt, status, comment textarea
+- Disable textarea if status === "GENERATED"
+- Save comment button triggers updateProjectComment()
+- Show “Generate design” only if status === "READY_FOR_GENERATION"
+- On click Generate:
+    - set isGenerating(true)
+    - call generateImage(id)
+    - after success → re-fetch project details
+    - set isGenerating(false)
+    - hide button after imageUrl present
+- While isGenerating === true show: “Generating your design… please wait”
+- If project.imageUrl exists render:
+    <img src={project.imageUrl} alt="Generated design" style={{ maxWidth: '100%', borderRadius: '12px' }} />
+
+#### 3️⃣ Acceptance criteria:
+- User can add/edit comment until image is generated
+- Refreshing browser mid-generation does NOT break anything, upon reload:
+    - If backend finished generating → UI shows image
+    - If still generating → show loading UI
+- No assumptions whether imageUrl is local (`/generated/...`) or Wasabi URL → just render <img src={imageUrl}>
+- Generate button hidden after image appears.
+
+### Important UX rule:
+- After clicking generate → disable all buttons and comment editing
+- Replace button text with spinner + “Generating design…”
+- Once generated → show image with smooth fade-in (CSS)

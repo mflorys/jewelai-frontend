@@ -1,0 +1,226 @@
+Open the file that contains the DesignFlowPage and QuestionStep component
+(currently page.tsx for the design flow screen).
+
+The current implementation of QuestionStep is too generic and causes a bug:
+- clicking any option makes all options look selected
+- the "Save and continue" button never submits the answer
+
+I want you to REWRITE the QuestionStep component to a much simpler, explicit
+radio-button logic. Leave all other helpers (normalizeQuestionJson, getQuestionMeta, etc.)
+and the DesignFlowPage component as they are. Only replace QuestionStep.
+
+Requirements:
+
+1) Each answer option must behave like a normal radio group:
+   - only one option can be active at a time
+   - clicking one option deselects the previous one
+   - the active option is derived from a single string state, not from any
+     complex object structure.
+
+2) The local state should be a simple string:
+   - name it selectedValue: string
+   - initialize it from existingAnswer.answerJson:
+     - if existingAnswer.answerJson is a string → use that
+     - if it is an object → try .value, then .code, then .key
+
+3) When the user changes selection:
+   - update selectedValue with the chosen option value
+   - do NOT try to store complex objects in state, only strings
+
+4) The "Save and continue" / "Finish setup" button:
+   - must be disabled only when:
+       selectedValue is empty OR isSubmitting is true
+   - in the JSX:
+       disabled={isSubmitting || isEmpty}
+       where isEmpty = !selectedValue.trim().length
+   - handleSubmit must:
+       - call event.preventDefault()
+       - if isEmpty or isSubmitting → return
+       - otherwise call onSubmit({ value: selectedValue })
+
+5) For options rendering:
+   - keep the existing visual styling (Tailwind classes) as much as possible
+   - for each option, compute:
+       const optValue = String(opt.value ?? opt.label ?? "");
+     and use this as:
+       - the value for the radio
+       - the key in the list
+       - the value used in comparison with selectedValue
+   - active state:
+       const active = selectedValue === optValue
+
+6) For questions without options:
+   - keep the textarea fallback, but wire it to the same pattern:
+       - selectedValue is used as the textarea value
+       - isEmpty is based on selectedValue.trim().length
+       - onSubmit should send { value: selectedValue }
+
+7) Keep the component props and external API the same:
+   function QuestionStep({
+     question,
+     step,
+     total,
+     existingAnswer,
+     isSubmitting,
+     isLast,
+     onSubmit,
+   }) { ... }
+
+Now apply these changes by replacing the existing QuestionStep implementation
+with the following version (adjust imports if needed but do not touch other logic):
+
+function QuestionStep({
+  question,
+  step,
+  total,
+  existingAnswer,
+  isSubmitting,
+  isLast,
+  onSubmit,
+}: {
+  question: QuizQuestion;
+  step: number;
+  total: number;
+  existingAnswer?: UserAnswer;
+  isSubmitting: boolean;
+  isLast: boolean;
+  onSubmit: (answerJson: unknown) => void;
+}) {
+  const meta = getQuestionMeta(question);
+
+  const initialValue = (() => {
+    const raw = existingAnswer?.answerJson;
+    if (typeof raw === "string") return raw;
+    if (raw && typeof raw === "object") {
+      const obj = raw as { value?: string; code?: string; key?: string };
+      return obj.value || obj.code || obj.key || "";
+    }
+    return "";
+  })();
+
+  const [selectedValue, setSelectedValue] = useState<string>(initialValue);
+
+  useEffect(() => {
+    // if the question changes or existingAnswer changes, reset the state
+    const raw = existingAnswer?.answerJson;
+    if (typeof raw === "string") {
+      setSelectedValue(raw);
+    } else if (raw && typeof raw === "object") {
+      const obj = raw as { value?: string; code?: string; key?: string };
+      setSelectedValue(obj.value || obj.code || obj.key || "");
+    } else {
+      setSelectedValue("");
+    }
+  }, [question.id, existingAnswer?.answerJson]);
+
+  const isEmpty = !selectedValue.trim().length;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting || isEmpty) return;
+    onSubmit({ value: selectedValue.trim() });
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-6 rounded-3xl border border-black/5 bg-white/80 p-6 shadow-inner shadow-black/5"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.25em] text-ash">
+            Step {step} of {total}
+          </p>
+          <h2 className="serif-heading text-2xl text-ink">{meta.title}</h2>
+          {meta.description && (
+            <p className="text-sm text-ash">{meta.description}</p>
+          )}
+        </div>
+        {meta.badge && (
+          <span className="rounded-full border border-gold/40 bg-gold/15 px-3 py-1 text-xs font-semibold text-ink">
+            {meta.badge}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        {meta.options && meta.options.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {meta.options.map((opt) => {
+              const optValue = String(opt.value ?? opt.label ?? "");
+              const active = selectedValue === optValue;
+              return (
+                <label
+                  key={optValue}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 text-left transition",
+                    active
+                      ? "border-gold bg-gold/15 text-ink shadow-md"
+                      : "border-black/10 bg-white hover:border-gold/60 hover:bg-gold/10",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name={`question-${question.id}`}
+                    value={optValue}
+                    checked={active}
+                    onChange={() => setSelectedValue(optValue)}
+                    className="sr-only"
+                  />
+                  <span className="text-sm font-semibold text-ink">
+                    {opt.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex h-4 w-4 items-center justify-center rounded-full border",
+                      active ? "border-gold bg-gold/60" : "border-black/20",
+                    )}
+                    aria-hidden="true"
+                  >
+                    {active && (
+                      <span className="h-2 w-2 rounded-full bg-white" />
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <textarea
+              value={selectedValue}
+              onChange={(e) => setSelectedValue(e.target.value)}
+              rows={4}
+              placeholder="Share the preference in a sentence or two"
+              className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm text-ink shadow-inner shadow-black/5 outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end">
+        <button
+          type="submit"
+          disabled={isSubmitting || isEmpty}
+          aria-disabled={isSubmitting || isEmpty}
+          className={cn(
+            "rounded-full border border-ink/10 bg-ink px-5 py-2 text-sm font-semibold text-ivory shadow-md transition",
+            "hover:-translate-y-[1px] hover:shadow-luxe",
+            (isSubmitting || isEmpty) && "opacity-60",
+          )}
+        >
+          {isSubmitting
+            ? "Saving..."
+            : isLast
+            ? "Finish setup"
+            : "Save and continue"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+After making these changes, run the app, go to the design questions page, and verify:
+- clicking one option highlights only that option,
+- the button becomes active and sends { value: "<selected option>" } to the backend,
+- the previously selected answer is restored when returning to the question.
