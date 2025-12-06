@@ -22,7 +22,7 @@ export function StatusBadge({ status, className, showPulse }: Props) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium",
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium whitespace-nowrap",
         base,
         className,
       )}

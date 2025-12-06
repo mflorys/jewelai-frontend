@@ -45,14 +45,43 @@ async function proxy(req: NextRequest, context: { params: { path: string[] } }) 
       headers: resHeaders,
     });
   } catch (err: any) {
+    console.error("[API Proxy Error]", {
+      url: url.toString(),
+      method: req.method,
+      error: err?.message,
+      code: err?.code,
+      cause: err?.cause,
+      stack: err?.stack,
+    });
+
+    // Check if it's a connection error (backend not running)
+    const isConnectionError = 
+      err?.message?.includes("ECONNREFUSED") ||
+      err?.message?.includes("fetch failed") ||
+      err?.message?.includes("connect") ||
+      err?.code === "ECONNREFUSED" ||
+      err?.cause?.code === "ECONNREFUSED" ||
+      err?.errno === "ECONNREFUSED";
+    
     const message =
       err?.name === "TimeoutError"
         ? "Proxy timeout while waiting for backend"
+        : isConnectionError
+        ? `Cannot connect to backend at ${BACKEND_URL}. Make sure the backend server is running.`
         : err?.message || "Proxy error";
+    const statusCode = err?.name === "TimeoutError" ? 504 : 502;
     return new NextResponse(
-      JSON.stringify({ error: message }),
+      JSON.stringify({ 
+        error: message,
+        backendUrl: url.toString(),
+        details: isConnectionError 
+          ? "The backend server appears to be down or unreachable. Please check that it's running on port 8080."
+          : "Backend may be unreachable or returned an invalid response",
+        originalError: process.env.NODE_ENV === "development" ? err?.message : undefined,
+        errorType: err?.name || typeof err,
+      }),
       {
-        status: 504,
+        status: statusCode,
         headers: { "content-type": "application/json" },
       },
     );

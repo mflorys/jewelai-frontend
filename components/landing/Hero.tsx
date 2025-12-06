@@ -32,13 +32,13 @@ export function Hero() {
         alt="Bespoke jewelry design"
         initial={{ y: 40, opacity: 0 }}
         animate={{
-          y: [0, -15, 0],
+          y: [0, -25, 0],
           opacity: 1,
         }}
         transition={{
           opacity: { delay: 0.1, duration: 0.7, ease: "easeOut" },
           y: {
-            duration: 6,
+            duration: 5,
             repeat: Infinity,
             ease: "easeInOut",
           },

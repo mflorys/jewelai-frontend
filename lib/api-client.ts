@@ -82,6 +82,10 @@ export const api = {
     request<void>(`/api/processes/${id}/start-generation`, { method: "POST" }),
   generateImage: (id: number) =>
     request<void>(`/api/processes/${id}/generate-image`, { method: "POST" }),
+  sendToReview: (id: number) =>
+    request<DesignProcess>(`/api/processes/${id}/send-to-review`, {
+      method: "POST",
+    }),
   deleteProcess: (id: number) =>
     request<void>(`/api/processes/${id}`, { method: "DELETE" }),
   getPrompt: (id: number) =>

@@ -18,6 +18,8 @@ import type {
   DesignProcess,
   DesignProcessDetails,
   DesignProcessStatus,
+  QuizQuestion,
+  UserAnswer,
 } from "@/lib/types";
 
 const DELETABLE_STATUSES: DesignProcessStatus[] = [
@@ -95,12 +97,25 @@ export default function ProjectsPage() {
       }
       return process;
     },
-    onSuccess: (process) => {
-      queryClient.invalidateQueries({ queryKey: ["processes"] });
+    onSuccess: async (process) => {
+      queryClient.setQueryData(["processes"], (prev?: DesignProcess[]) => {
+        if (!prev) return [process];
+        const existing = prev.find((p) => p.id === process.id);
+        if (existing) {
+          return prev.map((p) => (p.id === process.id ? { ...p, ...process } : p));
+        }
+        return [process, ...prev];
+      });
       setSelectedId(process.id);
       setShowCreate(false);
       setNewTitle("");
-      router.push(`/projects/${process.id}/design`);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("process", String(process.id));
+      router.replace(`/projects?${params.toString()}`);
+      await queryClient.prefetchQuery({
+        queryKey: ["process", process.id],
+        queryFn: () => api.getProcessDetails(process.id),
+      });
     },
     onError: (err) => {
       console.error(err);
@@ -112,8 +127,6 @@ export default function ProjectsPage() {
   });
 
   const selected = detailQuery.data;
-  const answers = detailQuery.data?.answers ?? [];
-  const answeredCount = answers.length;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(320px,380px)_1fr]">
@@ -183,7 +196,6 @@ export default function ProjectsPage() {
                 (prev?: DesignProcess) => (prev ? { ...prev, title } : prev),
               )
             }
-            answersCount={answeredCount}
             onStartDesign={() => router.push(`/projects/${selected.id}/design`)}
             onGenerationStarted={() => {
               queryClient.invalidateQueries({ queryKey: ["process", selected.id] });
@@ -329,7 +341,6 @@ function ProcessListItem({
 function ProjectDetail({
   process,
   onTitleUpdated,
-  answersCount,
   onStartDesign,
   onGenerationStarted,
   onProcessUpdated,
@@ -337,7 +348,6 @@ function ProjectDetail({
 }: {
   process: DesignProcessDetails;
   onTitleUpdated: (title: string) => void;
-  answersCount: number;
   onStartDesign: () => void;
   onGenerationStarted: () => void;
   onProcessUpdated: (process: DesignProcess) => void;
@@ -352,6 +362,12 @@ function ProjectDetail({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [comment, setComment] = useState<string>(process.additionalComment ?? "");
   const [commentSaving, setCommentSaving] = useState(false);
+  const [promptText, setPromptText] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [isPromptOpen, setIsPromptOpen] = useState(false);
+  const [promptAnswers, setPromptAnswers] = useState<
+    { question: string; answer: string; id: number }[]
+  >([]);
 
   useEffect(() => {
     setDraftTitle(process.title);
@@ -395,6 +411,44 @@ function ProjectDetail({
     },
   });
 
+  const sendToReview = useMutation({
+    mutationFn: () => api.sendToReview(process.id),
+    onSuccess: (updated) => {
+      onProcessUpdated(updated);
+      queryClient.setQueryData(["process", process.id], updated);
+      queryClient.invalidateQueries({ queryKey: ["processes"] });
+    },
+    onError: (err: any) => {
+      if (err?.status === 401) {
+        router.replace("/login");
+      }
+    },
+  });
+
+  const fetchPrompt = useMutation({
+    mutationFn: async () => {
+      const [promptRes, answersRes, questionsRes] = await Promise.all([
+        api.getPrompt(process.id),
+        api.getAnswers(process.id),
+        api.getQuestions(),
+      ]);
+      return { prompt: promptRes.prompt, answers: answersRes, questions: questionsRes };
+    },
+    onSuccess: ({ prompt, answers, questions }) => {
+      setPromptError(null);
+      setPromptText(prompt);
+      setPromptAnswers(formatAnswersForDisplay(answers, questions));
+      setIsPromptOpen(true);
+    },
+    onError: (err: any) => {
+      if (err?.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      setPromptError("Could not load the prompt right now.");
+    },
+  });
+
   const deleteProcess = useMutation({
     mutationFn: () => api.deleteProcess(process.id),
     onSuccess: () => {
@@ -405,6 +459,13 @@ function ProjectDetail({
 
   const canGenerate = process.status === "READY_FOR_GENERATION" && !process.imageUrl && !process.visualizationUrl;
   const canDelete = DELETABLE_STATUSES.includes(process.status);
+  const hasPreview = !!(process.visualizationUrl || process.imageUrl);
+  const sendReviewDisabled =
+    process.status === "SENT_TO_REVIEW" || sendToReview.isPending;
+  const statusIndex = statusFlow.indexOf(process.status);
+  const readyIndex = statusFlow.indexOf("READY_FOR_GENERATION");
+  const canShowPrompt =
+    statusIndex >= readyIndex && readyIndex !== -1;
 
   useEffect(() => {
     if (["GENERATION_REQUESTED", "GENERATING"].includes(process.status)) {
@@ -457,6 +518,10 @@ function ProjectDetail({
     !process.imageUrl &&
     !process.visualizationUrl;
   const commentDirty = (comment ?? "") !== (process.additionalComment ?? "");
+  const isGeneratingDisplay =
+    isGenerating ||
+    generateImage.isPending ||
+    ["GENERATION_REQUESTED", "GENERATING"].includes(process.status);
 
   const handleSaveComment = async () => {
     if (!isCommentEditable || !commentDirty) return;
@@ -478,8 +543,8 @@ function ProjectDetail({
   };
 
   return (
-    <div className="grid gap-6 px-2 sm:px-3">
-      <div className="flex flex-wrap items-start justify-between gap-3 pr-2 sm:pr-3">
+    <div className="grid gap-6 px-5 py-5 sm:px-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <h2 className="serif-heading text-2xl text-ink sm:text-3xl">
@@ -553,27 +618,6 @@ function ProjectDetail({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <InfoTile label="Current stage">
-          <div className="text-base font-semibold text-ink">
-            {statusLabels[process.status]}
-          </div>
-        </InfoTile>
-        <InfoTile label="Answered">
-          <div className="text-base font-semibold text-ink">
-            {answersCount} responses
-          </div>
-          <p className="text-xs text-ash">
-            {process.status === "READY_FOR_GENERATION"
-              ? "All required responses captured."
-              : "Continue the questionnaire to unlock generation."}
-          </p>
-        </InfoTile>
-        <InfoTile label="Project ID">
-          <div className="text-base font-semibold text-ink">#{process.id}</div>
-        </InfoTile>
-      </div>
-
       <div className="rounded-2xl border border-black/5 bg-white/80 p-5 shadow-inner shadow-black/5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -597,24 +641,53 @@ function ProjectDetail({
             </button>
           )}
           {canGenerate && (
-            <button
-              onClick={() => generateImage.mutate()}
-              disabled={generateImage.isPending || isGenerating}
-              className={cn(
-                "rounded-full border border-gold/50 bg-gold px-5 py-2 text-sm font-semibold text-ink shadow-md transition",
-                "hover:-translate-y-[1px] hover:shadow-luxe",
-                (generateImage.isPending || isGenerating) && "opacity-60 cursor-not-allowed",
-              )}
-            >
-              {generateImage.isPending || isGenerating
-                ? "Generating..."
-                : "Generate design"}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => generateImage.mutate()}
+                disabled={generateImage.isPending || isGenerating}
+                className={cn(
+                  "rounded-full border border-gold/50 bg-gold px-5 py-2 text-sm font-semibold text-ink shadow-md transition",
+                  "hover:-translate-y-[1px] hover:shadow-luxe",
+                  (generateImage.isPending || isGenerating) && "opacity-60 cursor-not-allowed",
+                )}
+              >
+                {generateImage.isPending || isGenerating
+                  ? "Generating..."
+                  : "Generate design"}
+              </button>
+            </div>
           )}
-          {isGenerating && (
-            <div className="flex items-center gap-2 rounded-full bg-parchment px-4 py-2 text-sm text-ash">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-gold" />
-              Your design is being prepared…
+          {canShowPrompt && (
+            <div className="flex flex-wrap items-start gap-2">
+              <button
+                type="button"
+                onClick={() => fetchPrompt.mutate()}
+                disabled={fetchPrompt.isPending}
+                className={cn(
+                  "rounded-full border border-black/15 bg-white px-4 py-2 text-xs font-semibold text-ink shadow-sm transition",
+                  "hover:-translate-y-[1px] hover:shadow",
+                  fetchPrompt.isPending && "opacity-60 cursor-not-allowed",
+                )}
+              >
+                {fetchPrompt.isPending ? "Loading prompt..." : "Show prompt"}
+              </button>
+              {isPromptOpen && promptText && (
+                <div className="w-full max-w-2xl rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-ink shadow-inner shadow-black/5 whitespace-pre-wrap break-words">
+                  <div>{promptText}</div>
+                  {promptAnswers.length > 0 && (
+                    <div className="mt-2 border-t border-black/10 pt-2">
+                      <ol className="space-y-1">
+                        {promptAnswers.map((item, idx) => (
+                          <li key={item.id} className="leading-relaxed">
+                            <span className="font-semibold">{idx + 1}. {item.question}:</span>{" "}
+                            <span className="font-normal">{item.answer}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {canDelete && (
@@ -634,12 +707,18 @@ function ProjectDetail({
           )}
         </div>
 
+          {isGeneratingDisplay && (
+            <div className="mt-4">
+              <GenerationInProgress />
+            </div>
+          )}
+
         <div className="mt-4 text-sm text-ash">
           {process.status === "INTAKE_IN_PROGRESS" &&
             "Finish the short questionnaire to unlock generation."}
           {process.status === "READY_FOR_GENERATION" &&
             "All required answers are in. Generate a preview to send to your client."}
-          {isGenerating &&
+          {isGeneratingDisplay &&
             "Generating your design… please wait. We check for status updates every few seconds."}
           {(process.status === "VISUAL_READY" || process.status === "GENERATED") &&
             "Preview is ready. Share it with your client or continue to production steps."}
@@ -649,10 +728,15 @@ function ProjectDetail({
             {generationError}
           </div>
         )}
+        {promptError && (
+          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {promptError}
+          </div>
+        )}
         <div className="mt-5 grid gap-2">
           <div className="flex items-center justify-between">
             <label className="text-sm font-semibold text-ink" htmlFor="project-comment">
-              Your note
+              Additional comments
             </label>
             <span className="text-xs text-ash">{comment.length}/500</span>
           </div>
@@ -661,7 +745,7 @@ function ProjectDetail({
             value={comment}
             onChange={(e) => setComment(e.target.value.slice(0, 500))}
             disabled={!isCommentEditable || commentSaving}
-            placeholder="Add context for your team or client..."
+            placeholder="Add any additional details or special requests for this jewelry design"
             className={cn(
               "w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm text-ink shadow-inner shadow-black/5 outline-none focus:border-gold focus:ring-2 focus:ring-gold/30",
               (!isCommentEditable || commentSaving) && "opacity-70",
@@ -695,23 +779,43 @@ function ProjectDetail({
               </p>
               <p className="serif-heading text-lg">Visualization</p>
             </div>
-            {(process.visualizationUrl || process.imageUrl) && (
-              <Link
-                href={process.visualizationUrl || process.imageUrl!}
-                target="_blank"
-                className="rounded-full border border-gold/60 bg-gold px-4 py-1 text-xs font-semibold text-ink transition hover:-translate-y-[1px]"
-              >
-                Open full size
-              </Link>
-            )}
+            <div className="flex items-center gap-2">
+              {(process.visualizationUrl || process.imageUrl) && (
+                <Link
+                  href={process.visualizationUrl || process.imageUrl!}
+                  target="_blank"
+                  className="rounded-full border border-gold/60 bg-gold px-4 py-1 text-xs font-semibold text-ink transition hover:-translate-y-[1px]"
+                >
+                  Open full size
+                </Link>
+              )}
+              {hasPreview && (
+                <button
+                  type="button"
+                  onClick={() => sendToReview.mutate()}
+                  disabled={sendReviewDisabled}
+                  className={cn(
+                    "rounded-full border border-gold/60 bg-white/90 px-4 py-1 text-xs font-semibold text-ink shadow-md transition",
+                    "hover:-translate-y-[1px] hover:shadow-luxe",
+                    sendReviewDisabled && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  {sendToReview.isPending
+                    ? "Sending..."
+                    : process.status === "SENT_TO_REVIEW"
+                    ? "Sent to review"
+                    : "Send to review"}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="relative h-96 bg-ink">
+          <div className="relative aspect-[4/3] min-h-[320px] bg-ink flex items-center justify-center">
             <Image
               src={process.visualizationUrl || process.imageUrl!}
               alt="Generated jewelry visualization"
               fill
-              className="object-cover transition-opacity duration-500"
-              sizes="100vw"
+              className="object-contain p-3 transition-opacity duration-500"
+              sizes="(min-width: 1024px) 50vw, 100vw"
               unoptimized
             />
           </div>
@@ -840,6 +944,41 @@ function ProjectDetail({
   );
 }
 
+function GenerationInProgress() {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-gold/40 bg-gradient-to-br from-ivory/85 via-parchment/80 to-gold/15 p-5 shadow-inner shadow-black/5">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-16 top-[-30%] h-44 w-44 animate-[spin_18s_linear_infinite] rounded-full bg-[conic-gradient(from_45deg,rgba(212,175,55,0.4),rgba(255,250,242,0.25),rgba(212,175,55,0.4))] opacity-60 blur-2xl" />
+        <div className="absolute bottom-[-25%] right-[-10%] h-36 w-36 animate-[spin_24s_linear_infinite] rounded-full bg-[conic-gradient(from_160deg,rgba(15,12,10,0.1),rgba(212,175,55,0.25),rgba(15,12,10,0.08))] opacity-50 blur-3xl" />
+      </div>
+      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="relative h-16 w-16 shrink-0">
+          <div className="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,#d4af37,rgba(255,250,242,0.6),#d4af37)] opacity-70 blur" />
+          <div className="absolute inset-1 rounded-full border border-gold/60 opacity-80" />
+          <div className="absolute inset-0 animate-[spin_12s_linear_infinite] rounded-full border border-gold/50" />
+          <div
+            className="absolute inset-[6px] rounded-full border border-ink/10"
+            style={{ animation: "spin 9s linear infinite reverse" }}
+          />
+          <div className="absolute inset-[14px] flex items-center justify-center rounded-full bg-ink text-[11px] font-semibold uppercase tracking-[0.08em] text-ivory shadow-md">
+            AI
+          </div>
+          <div className="absolute -bottom-1 -right-1 h-3 w-3 animate-ping rounded-full bg-gold shadow-[0_0_0_6px_rgba(212,175,55,0.15)]" />
+        </div>
+        <div className="space-y-1 text-ink">
+          <p className="serif-heading text-lg">Crafting your visualization</p>
+          <p className="text-sm text-ash">
+            Our render engine is layering metals, stones, lighting, and camera angles.
+          </p>
+          <p className="text-sm text-ash">
+            Keep this tab open - your preview updates automatically as soon as it&apos;s ready.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InfoTile({
   label,
   children,
@@ -860,14 +999,27 @@ const statusFlow: DesignProcessStatus[] = [
   "READY_FOR_GENERATION",
   "GENERATION_REQUESTED",
   "VISUAL_READY",
+  "GENERATED",
+  "SENT_TO_REVIEW",
+  "CLIENT_ACCEPTED",
   "APPROVED_FOR_PRODUCTION",
   "IN_PRODUCTION",
+  "CRAFTED",
   "SHIPPING",
+  "IN_DELIVERY",
   "COMPLETED",
+  "RETURN_IN_PROGRESS",
 ];
 
 function StatusTimeline({ current }: { current: DesignProcessStatus }) {
-  const activeIndex = statusFlow.indexOf(current);
+  const currentIndex = statusFlow.indexOf(current);
+  const fallbackIndex = statusFlow.indexOf("READY_FOR_GENERATION");
+  const effectiveIndex =
+    currentIndex === -1
+      ? fallbackIndex === -1
+        ? 0
+        : fallbackIndex
+      : currentIndex;
   return (
     <div className="rounded-2xl border border-black/5 bg-white/80 p-5">
       <p className="text-xs uppercase tracking-[0.2em] text-ash">
@@ -875,22 +1027,27 @@ function StatusTimeline({ current }: { current: DesignProcessStatus }) {
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-4">
         {statusFlow.map((status, idx) => {
-          const active = idx <= activeIndex;
+          const isCurrent = idx === effectiveIndex;
+          const isPast = idx < effectiveIndex;
+          const state = isCurrent ? "current" : isPast ? "past" : "future";
           return (
             <div
               key={status}
               className={cn(
                 "rounded-2xl border px-3 py-3 text-sm",
-                active
-                  ? "border-gold/40 bg-gold/15 text-ink shadow-sm"
-                  : "border-black/10 bg-white/60 text-ash",
+                state === "past" && "border-gold/40 bg-gold/15 text-ink shadow-sm",
+                state === "current" &&
+                  "border-gold bg-gold/25 text-ink shadow-md ring-1 ring-gold/30",
+                state === "future" && "border-black/10 bg-white/60 text-ash",
               )}
             >
               <div className="flex items-center gap-2">
                 <span
                   className={cn(
                     "h-2 w-2 rounded-full",
-                    active ? "bg-gold" : "bg-black/20",
+                    state === "past" && "bg-gold",
+                    state === "current" && "bg-gold shadow-[0_0_0_6px_rgba(212,175,55,0.18)]",
+                    state === "future" && "bg-black/20",
                   )}
                 />
                 <span className="font-semibold">
@@ -903,4 +1060,84 @@ function StatusTimeline({ current }: { current: DesignProcessStatus }) {
       </div>
     </div>
   );
+}
+
+function formatAnswersForDisplay(
+  answers: unknown,
+  questions: unknown,
+): { question: string; answer: string; id: number }[] {
+  const normalizedAnswers = normalizeAnswers(answers);
+  if (!normalizedAnswers.length) return [];
+  const questionMap = new Map<number, string>();
+  if (Array.isArray(questions)) {
+    for (const q of questions as QuizQuestion[]) {
+      questionMap.set(q.id, getQuestionTitle(q));
+    }
+  }
+  return normalizedAnswers.map((answer) => {
+    const questionLabel = stripLeadingNumbering(
+      questionMap.get(answer.questionId) ??
+        answer.questionCode ??
+        `Question ${answer.questionId}`,
+    );
+    return {
+      id: answer.questionId,
+      question: questionLabel,
+      answer: extractAnswerText(answer.answerJson),
+    };
+  });
+}
+
+function getQuestionTitle(question: QuizQuestion): string {
+  const raw = question.questionJson;
+  let obj: any = raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        obj = parsed;
+      }
+    } catch {
+      obj = {};
+    }
+  }
+  if (obj && typeof obj === "object") {
+    const keys = ["title", "prompt", "question", "text", "label", "name"];
+    for (const key of keys) {
+      const value = obj[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+  }
+  return question.code || `Question ${question.id}`;
+}
+
+function stripLeadingNumbering(label: string): string {
+  return label.replace(/^\s*\d+[\.\)]\s*/, "").trim();
+}
+
+function extractAnswerText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = ["value", "label", "text", "title", "name", "choice", "answer", "code", "key"];
+    for (const key of keys) {
+      const v = obj[key];
+      if (typeof v === "string" && v.trim()) return v;
+      if (typeof v === "number" || typeof v === "boolean") return String(v);
+    }
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+function normalizeAnswers(data: unknown): UserAnswer[] {
+  if (Array.isArray(data)) return data as UserAnswer[];
+  if (data && typeof data === "object" && Array.isArray((data as any).answers)) {
+    return (data as any).answers as UserAnswer[];
+  }
+  return [];
 }

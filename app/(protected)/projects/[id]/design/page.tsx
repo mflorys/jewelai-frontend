@@ -38,28 +38,52 @@ export default function DesignFlowPage() {
     () => questionsQuery.data ?? [],
     [questionsQuery.data],
   );
-  const answers = useMemo(() => answersQuery.data ?? [], [answersQuery.data]);
+  const answers = useMemo(() => {
+    const data = answersQuery.data as any;
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.answers)) return data.answers;
+    return [];
+  }, [answersQuery.data]);
 
-  const currentQuestion = useMemo(() => {
-    if (!questions.length) return undefined;
-    const answeredIds = new Set(answers.map((a) => a.questionId));
-    return questions.find((q) => !answeredIds.has(q.id)) ?? questions.at(-1);
-  }, [answers, questions]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [initializedIndex, setInitializedIndex] = useState(false);
 
-  const currentIndex = useMemo(() => {
-    if (!currentQuestion) return 0;
-    return Math.max(
-      0,
-      questions.findIndex((q) => q.id === currentQuestion.id),
-    );
-  }, [currentQuestion, questions]);
+  useEffect(() => {
+    if (!questions.length) return;
+    setActiveIndex((prev) => {
+      const clamped = Math.min(prev, Math.max(questions.length - 1, 0));
+      if (initializedIndex) return clamped;
+      const answeredIds = new Set(answers.map((a) => a.questionId));
+      const firstUnanswered = questions.findIndex((q) => !answeredIds.has(q.id));
+      return firstUnanswered === -1 ? clamped : firstUnanswered;
+    });
+    if (!initializedIndex) setInitializedIndex(true);
+  }, [answers, initializedIndex, questions]);
+
+  const currentQuestion = questions[activeIndex];
+  const currentIndex = currentQuestion ? activeIndex : 0;
 
   const submitAnswer = useMutation({
     mutationFn: (payload: { questionId: number; answerJson: unknown }) =>
       api.submitAnswer(processId, payload.questionId, payload.answerJson),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["answers", processId], (prev: any) => {
+        const prevAnswers = Array.isArray(prev)
+          ? prev
+          : Array.isArray(prev?.answers)
+          ? prev.answers
+          : [];
+        const nextAnswers = prevAnswers.filter(
+          (a: UserAnswer) => a.questionId !== saved.questionId,
+        );
+        nextAnswers.push(saved);
+        return nextAnswers;
+      });
       queryClient.invalidateQueries({ queryKey: ["answers", processId] });
       queryClient.invalidateQueries({ queryKey: ["process", processId] });
+      setActiveIndex((prev) =>
+        Math.min(prev + 1, Math.max(questions.length - 1, 0)),
+      );
     },
   });
 
@@ -105,7 +129,7 @@ export default function DesignFlowPage() {
           Answer our questions and we will visualize the jewelry that best suits your needs.
         </p>
         <p className="text-sm text-ash">
-          Question {Math.min(answers.length + 1, Math.max(questions.length, 1))} of{" "}
+          Question {Math.min(currentIndex + 1, Math.max(questions.length, 1))} of{" "}
           {questions.length || "—"}
         </p>
       </div>
@@ -128,6 +152,8 @@ export default function DesignFlowPage() {
           }
           isSubmitting={submitAnswer.isPending}
           isLast={currentIndex === questions.length - 1}
+          onBack={() => setActiveIndex((prev) => Math.max(0, prev - 1))}
+          canGoBack={currentIndex > 0}
         />
       )}
 
@@ -256,6 +282,8 @@ function QuestionStep({
   isSubmitting,
   isLast,
   onSubmit,
+  onBack,
+  canGoBack,
 }: {
   question: QuizQuestion;
   step: number;
@@ -264,6 +292,8 @@ function QuestionStep({
   isSubmitting: boolean;
   isLast: boolean;
   onSubmit: (answerJson: unknown) => void;
+  onBack: () => void;
+  canGoBack: boolean;
 }) {
   const meta = getQuestionMeta(question);
 
@@ -377,7 +407,18 @@ function QuestionStep({
         )}
       </div>
 
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={!canGoBack || isSubmitting}
+          className={cn(
+            "rounded-full border border-black/15 bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm transition hover:-translate-y-[1px] hover:shadow",
+            (!canGoBack || isSubmitting) && "opacity-50 cursor-not-allowed",
+          )}
+        >
+          Back
+        </button>
         <button
           type="submit"
           disabled={isSubmitting || isEmpty}
@@ -388,11 +429,7 @@ function QuestionStep({
             (isSubmitting || isEmpty) && "opacity-60",
           )}
         >
-          {isSubmitting
-            ? "Saving..."
-            : isLast
-            ? "Finish setup"
-            : "Save and continue"}
+          {isSubmitting ? "Saving..." : isLast ? "Finish setup" : "Next"}
         </button>
       </div>
     </form>
